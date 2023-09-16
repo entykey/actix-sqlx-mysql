@@ -1,0 +1,20 @@
+[package]
+name = "actix_sqlx_mysql"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = "4.2.1"
+serde = { version = "1.0.150", features = ["derive"] }
+sqlx = { version = "0.6.2", features = ["runtime-actix-rustls", "mysql", "macros"] }
+futures = "0.3.25"
+uuid = { version = "1.4.1", features = ["v4"] }
+
+[package.metadata.scripts]
+env = "echo && echo 'set DATABASE_URL 'mysql://user:password@127.0.0.1:3306/actix_sqlx'' && echo"
+db_create = "bash ./scripts/create_db.sh"
+db_start = "docker start actix_sqlx"
+db_stop = "docker stop actix_sqlx"
+db_remove = "docker rm actix_sqlx"

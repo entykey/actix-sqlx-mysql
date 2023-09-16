@@ -1,0 +1,35 @@
+# -*- restclient -*-
+
+# Check if server is running
+
+GET http://localhost:4000/
+
+# Get users
+GET http://localhost:4000/get-all
+
+# Get single user
+GET http://localhost:4000/get/4
+
+# Create user
+POST http://localhost:4000/create
+Content-Type: application/json
+{
+        "username": "test",
+        "email": "test@mail.de"
+}
+
+# Update a user account
+PATCH http://localhost:4000/patch
+Content-Type: application/json
+{
+        "id": 4,
+        "username": "testx",
+        "email": "testx@mail.de"
+}
+
+# Delete a user
+DELETE http://localhost:4000/delete
+Content-Type: application/json
+{
+        "id": 4
+}
