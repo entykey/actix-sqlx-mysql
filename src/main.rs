@@ -33,12 +33,25 @@ struct Thing {
     string: String,
 }
 
+/* 
+//  NULLABLE email (NULL by default )
 #[derive(Debug, Serialize, Deserialize)]
 struct User {
     //id: i32,
     id: String,
     username: String,
-    email: String,
+    email: Option<String>,  // (MySQL col settings:  NULL = Yes, default = NULL) (accept NULL)
+                            //  If non-NULLABLE (NULL = No) => error
+}
+*/
+// Non-NULLABLE email, (empty string by default)
+#[derive(Debug, Serialize, Deserialize)]
+struct User {
+    //id: i32,
+    id: String,
+    username: String,
+    email: String,  // (MySQL col settings:  NULL = No, default = None) (accept Non-NULL)
+                    //  If non-NULLABLE (NULL = yes, default = NULL) => error
 }
 
 #[derive(Serialize, Deserialize)]
@@ -112,6 +125,7 @@ async fn demo(app_state: web::Data<AppState>) -> HttpResponse {
     HttpResponse::Ok().json(things)
 }
 
+
 async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpResponse {
     let user_id: i32 = path.into_inner(); 
     /* Queries
@@ -157,9 +171,12 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
      *    .fetch_one(&app_state.pool)
      *    .await;
      */
+    
+    /* 
     let updated: sqlx::Result<MySqlQueryResult> = sqlx::query!(
         "DROP TABLE users",
     ).execute(&app_state.pool).await;
+    */
 
     let user: Result<User, sqlx::Error> = sqlx::query_as!(
         User,
@@ -185,28 +202,54 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
 }
 
 
-// 4ms (Postman)
+
+// 3ms - 10ms (Postman)
+// works fine for NON-NULLABLE email        (MySQL col settings:  NULL = No, default = None) (accept email='')
+// panic on NULLABLE                        (MySQL col settings:  NULL = Yes, default = NULL) (accept email=NULL)
 async fn get_all_users(app_state: web::Data<AppState>) -> HttpResponse {
     // timer
     let time = std::time::Instant::now();
 
-    let users: Vec<User> = sqlx::query_as!(
+    // Fetch users, including those with NULL email
+    let mut users: Vec<User> = sqlx::query_as!(
         User,
         "SELECT * FROM users",
-    ).fetch_all(&app_state.pool).await.unwrap();
+    )
+    .fetch_all(&app_state.pool)
+    .await
+    .unwrap();
+
+    
+    // Modify the email field directly within the User struct
+    // for user in users.iter_mut() {
+    //     if user.email.is_empty() {
+    //         user.email = "Not Provided".to_string(); 
+    //     }
+    // }
+
+    
+    // Modify the email field directly within the User struct using functional style
+    // More performance than for loop (tested with 5 duplications of looping code)
+    users.iter_mut().for_each(|user| {
+        if user.email.is_empty() {
+            user.email = "Not Provided".to_string();    // Map empty email to "null" string
+        }
+    });
 
     // stop timer & print to terminal
     let duration = time.elapsed();
     let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
-    let elaped_seconds = elapsed_ms / 1000.0;
-    println!("query time: {:?} ({:?} ms) ({:.8} s)", duration, elapsed_ms, elaped_seconds);
+    let elapsed_seconds = elapsed_ms / 1000.0;
+    println!("query time: {:?} ({:?} ms) ({:.8} s)", duration, elapsed_ms, elapsed_seconds);
 
-    // response
+    // Response
     HttpResponse::Ok().json(UsersResponse {
         users,
         message: "Got all users.".to_string(),
     })
 }
+
+
 /* test run: (windows 10, Intel i5 gen 10)
 query time: 1.6042ms (1.6042 ms) (0.00160420 s)
 query time: 1.2359ms (1.2359 ms) (0.00123590 s)
