@@ -130,6 +130,7 @@ async fn main() -> std::io::Result<()> {
 
             // AspNet Identity (other database):
             .route("/get-aspnet-users", web::get().to(get_aspnet_users))
+            .route("/auth", web::post().to(authenticate_user))
     })
     .bind(("127.0.0.1", 4000))?
     .run()
@@ -404,7 +405,7 @@ async fn fetch_aspnet_users(pool: &MySqlPool) -> Result<Vec<AspNetUser>, sqlx::E
     Ok(users)
 }
 
-// HTTP handler (controller)
+// HTTP handler for getting al AspNetUser (controller)
 async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
     // timer
     let time = std::time::Instant::now();
@@ -467,6 +468,94 @@ query time: 1.565801ms (1.565801 ms) (0.00156580 s)
 {"users":[{"Id":"d60449d4-f1c2-43e9-a62f-ae087357fa05","UserName":"nguyentuan8a10ntk@gmail.com","Email":"nguyentuan8a10ntk@gmail.com","PasswordHash":"AQAAAAIAAYagAAAAEKxpBdIrGR6M67pLiiKJA1Jr9LRGHQ8/fln+oHWBvk96wsC4gatTOqyU6zyr76naZw=="}],"message":"Got all ASP.NET users."}
 
 */
+
+// Request model to accept user credentials for authentication.
+#[derive(Debug, Serialize, Deserialize)]
+struct AuthRequest {
+    username_or_email: String,
+}
+
+// Define a function to fetch one user by username or email.
+async fn fetch_one_aspnet_user(
+    app_state: web::Data<AppState>,
+    username_or_email: &str,
+) -> Result<Option<AspNetUser>, sqlx::Error> {
+    let user: Result<Option<AspNetUser>, sqlx::Error> = match sqlx::query(
+        "SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM Users u WHERE u.UserName = ? OR u.Email = ?",
+    )
+    .bind(username_or_email)
+    .bind(username_or_email)
+    .fetch_one(&app_state.pool)
+    .await
+    {
+        Ok(row) => Ok(Some(AspNetUser {
+            Id: row.get(0),
+            UserName: row.get(1),
+            Email: row.get(2),
+            PasswordHash: row.get(3),
+        })),
+
+        // if enter invalid email, it cause RowNotFound error, so we'll handle it from here
+        Err(sqlx::Error::RowNotFound) => Ok(None), // Handle RowNotFound here
+
+        // catching other errors here
+        Err(e) => Err(e),
+    };
+
+    user
+}
+
+// Handler for user authentication.
+async fn authenticate_user(
+    app_state: web::Data<AppState>,
+    auth_request: web::Json<AuthRequest>, // Use the request model.
+) -> HttpResponse {
+    // timer
+    let time = std::time::Instant::now();
+
+    match fetch_one_aspnet_user(app_state, &auth_request.username_or_email).await {
+        Ok(Some(user)) => {
+            // stop timer & print to terminal
+            let duration = time.elapsed();
+            let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+            let elapsed_seconds = elapsed_ms / 1000.0;
+            println!(
+                "query time: {:?} ({:?} ms) ({:.8} s)",
+                duration, elapsed_ms, elapsed_seconds
+            );
+
+
+            // User found, return the user.
+            HttpResponse::Ok().json(AspNetUsersResponse {
+                users: vec![user],
+                message: "Found user.".to_string(),
+            })
+        }
+        Ok(None) => {
+            // stop timer & print to terminal
+            let duration = time.elapsed();
+            let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+            let elapsed_seconds = elapsed_ms / 1000.0;
+            println!(
+                "query time: {:?} ({:?} ms) ({:.8} s)",
+                duration, elapsed_ms, elapsed_seconds
+            );
+
+
+            // User not found, return an empty list and appropriate message.
+            HttpResponse::Ok().json(AspNetUsersResponse {
+                users: vec![],
+                message: "No account exists with the given credentials.".to_string(),
+            })
+        }
+        Err(err) => {
+            // Handle the error, you can return an internal server error or customize it as needed.
+            println!("Hey, Caught An Error: {:?}", err);
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
 
 
 
