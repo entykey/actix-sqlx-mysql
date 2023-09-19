@@ -19,4 +19,10 @@ pub mod models {
         pub users: Vec<AspNetUser>,
         pub message: String,
     }
+
+    // Request model to accept user credentials for authentication.
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AuthRequest {
+        pub username_or_email: String,
+    }
 }

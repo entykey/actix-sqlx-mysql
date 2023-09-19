@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 // define modules & import
 mod models; // Create a new module named "models" by convention
-use models::models::{AspNetUser, AspNetUsersResponse}; // Specify the correct module path
+use models::models::{AspNetUser, AspNetUsersResponse, AuthRequest}; // Specify the correct module path
 
 #[derive(Clone)]
 struct AppState {
@@ -469,11 +469,8 @@ query time: 1.565801ms (1.565801 ms) (0.00156580 s)
 
 */
 
-// Request model to accept user credentials for authentication.
-#[derive(Debug, Serialize, Deserialize)]
-struct AuthRequest {
-    username_or_email: String,
-}
+
+
 
 // Define a function to fetch one user by username or email.
 async fn fetch_one_aspnet_user(
