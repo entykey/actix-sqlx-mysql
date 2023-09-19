@@ -411,7 +411,7 @@ async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
     )
     .map(|user: sqlx::mysql::MySqlRow|{
         AspNetUser {
-            Id: user.get(0),
+            Id: user.get(0),    // must add 'use sqlx::Row' !!
             UserName: user.get(1),
             Email: user.get(2),
             PasswordHash: user.get(3),
