@@ -6,15 +6,15 @@
 // Note: to fix the ERR of mysql: "Column count of mysql.proc is wrong. Expected 20, found 16. The table is probably corrupted"
 // Run: $ sudo /Applications/XAMPP/xamppfiles/bin/mysql_upgrade
 
-use actix_web::{ HttpServer,
-                 App,
-                 HttpResponse,
-                 web };
-use serde::{ Serialize, Deserialize };
-use sqlx::mysql::{ MySqlConnection, MySqlPool, MySqlPoolOptions, MySqlQueryResult, MySqlRow };
-use sqlx::{FromRow, Connection, Row};
+use actix_web::{web, App, HttpResponse, HttpServer};
+use serde::{Deserialize, Serialize};
+use sqlx::mysql::{MySqlConnection, MySqlPool, MySqlPoolOptions, MySqlQueryResult, MySqlRow};
+use sqlx::{Connection, FromRow, Row};
 use uuid::Uuid;
 
+// define modules & import
+mod models; // Create a new module named "models" by convention
+use models::models::{AspNetUser, AspNetUsersResponse}; // Specify the correct module path
 
 #[derive(Clone)]
 struct AppState {
@@ -33,7 +33,7 @@ struct Thing {
     string: String,
 }
 
-/* 
+/*
 //  NULLABLE email (NULL by default )
 #[derive(Debug, Serialize, Deserialize)]
 struct User {
@@ -50,8 +50,8 @@ struct User {
     //id: i32,
     id: String,
     username: String,
-    email: String,  // (MySQL col settings:  NULL = No, default = None) (accept Non-NULL)
-                    //  If non-NULLABLE (NULL = yes, default = NULL) => error
+    email: String, // (MySQL col settings:  NULL = No, default = None) (accept Non-NULL)
+                   //  If non-NULLABLE (NULL = yes, default = NULL) => error
 }
 
 // Define User struct with lifetimes for references
@@ -97,12 +97,12 @@ struct UsersResponse {
 async fn main() -> std::io::Result<()> {
 
     // let _database_url: String = env::var("DATABASE_URL").unwrap();
-    const DATABASE_URL: &str = "mysql://user:password@127.0.0.1:3306/BlazorServerCrud";   // "mysql://user:password@127.0.0.1:3306/actix_sqlx"
+    const DATABASE_URL: &str = "mysql://user:password@127.0.0.1:3306/BlazorServerCrud"; // "mysql://user:password@127.0.0.1:3306/actix_sqlx"
 
     /* Connecting to a database
      * for single connection:
      * [MySql|Sqlite|PgConnection...]Connection::connect()
-     * 
+     *
      * for pool connection:
      * [MysqlPool|...]::connect()
      *
@@ -130,9 +130,10 @@ async fn main() -> std::io::Result<()> {
 
             // AspNet Identity (other database):
             .route("/get-aspnet-users", web::get().to(get_aspnet_users))
-    }).bind(("127.0.0.1", 4000))?
-        .run()
-        .await
+    })
+    .bind(("127.0.0.1", 4000))?
+    .run()
+    .await
 }
 
 async fn root() -> HttpResponse {
@@ -155,7 +156,7 @@ async fn root() -> HttpResponse {
 
 /*
 async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpResponse {
-    let user_id: i32 = path.into_inner(); 
+    let user_id: i32 = path.into_inner();
     /* Queries
      * prepared (parameterized):
      *   have their quey plan cached, use a
@@ -166,16 +167,16 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
      * unprepared (simple):
      *   intended only for use case where
      *   prepared  statement will not work
-     * 
+     *
      * &str is treated as an unprepared query
      * Query or QueryAs struct is treated as
      * prepared query
      *
      *  conn.execute("BEGIN").await                            <- unprepared
      *  conn.execute(sqlx::query("DELETE FROM table")).await   <- prepared
-     * 
+     *
      * All methods accept one of &mut {connection type}, &mut Transaction or &Pool
-     * 
+     *
      * sqlx::query(""); // Query
      * sqlx::query_as(""); // QueryAs
      * sqlx::query("QUERY").fetch_one(&pool).await // <- sqlx::Result<MySqlRow>
@@ -193,14 +194,14 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
      *     email: String,
      *     username: String,
      * }
-     * 
+     *
      * let user_0: sqlx::Result<UserRow> = sqlx::query_as("SELECT * FROM users WHERE id=?")
      *    .bind(user_id)
      *    .fetch_one(&app_state.pool)
      *    .await;
      */
-    
-    /* 
+
+    /*
     let updated: sqlx::Result<MySqlQueryResult> = sqlx::query!(
         "DROP TABLE users",
     ).execute(&app_state.pool).await;
@@ -224,11 +225,12 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
     }
 
     HttpResponse::Ok().json(UserResponse {
-        user: user.unwrap(), 
+        user: user.unwrap(),
         message: "Got user.".to_string(),
     })
 }
 */
+
 
 
 
@@ -248,15 +250,13 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
 //     .await
 //     .unwrap();
 
-    
 //     // Modify the email field directly within the User struct
 //     // for user in users.iter_mut() {
 //     //     if user.email.is_empty() {
-//     //         user.email = "Not Provided".to_string(); 
+//     //         user.email = "Not Provided".to_string();
 //     //     }
 //     // }
 
-    
 //     // Modify the email field directly within the User struct using functional style
 //     // More performance than for loop (tested with 5 duplications of looping code)
 //     users.iter_mut().for_each(|user| {
@@ -325,7 +325,6 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
 //     })
 // }
 
-
 /* test run: (windows 10, Intel i5 gen 10)
 query time: 1.6042ms (1.6042 ms) (0.00160420 s)
 query time: 1.2359ms (1.2359 ms) (0.00123590 s)
@@ -386,84 +385,83 @@ query time: 1.162814ms (1.162814 ms) (0.00116281 s)
 
 
 
-#[allow(non_snake_case)]
-#[derive(Debug, Serialize, Deserialize)]
-struct AspNetUser {
-    Id: String,
-    UserName: String,
-    Email: String,
-    PasswordHash: String,
-}
-#[allow(non_snake_case)]
-#[derive(Serialize, Deserialize)]
-struct AspNetUsersResponse {
-    users: Vec<AspNetUser>,
-    message: String
+
+// Define the private function to fetch ASP.NET users (Repository)
+async fn fetch_aspnet_users(pool: &MySqlPool) -> Result<Vec<AspNetUser>, sqlx::Error> {
+    let users: Vec<AspNetUser> =
+        sqlx::query("SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM Users u")
+            .map(|user: sqlx::mysql::MySqlRow| {
+                AspNetUser {
+                    Id: user.get(0), // must add 'use sqlx::Row' !!
+                    UserName: user.get(1),
+                    Email: user.get(2),
+                    PasswordHash: user.get(3),
+                }
+            })
+            .fetch_all(pool)
+            .await?;
+
+    Ok(users)
 }
 
+// HTTP handler (controller)
 async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
     // timer
     let time = std::time::Instant::now();
 
-    // Fetch users, including those with NULL email
-    let mut users: Vec<AspNetUser> = sqlx::query(
-        "SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM Users u",
-    )
-    .map(|user: sqlx::mysql::MySqlRow|{
-        AspNetUser {
-            Id: user.get(0),    // must add 'use sqlx::Row' !!
-            UserName: user.get(1),
-            Email: user.get(2),
-            PasswordHash: user.get(3),
+    // Fetch ASP.NET users using the private function
+    let users_result = fetch_aspnet_users(&app_state.pool).await;
+
+    // Handle the result or return an error response
+    match users_result {
+        Ok(users) => {
+            // stop timer & print to terminal
+            let duration = time.elapsed();
+            let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+            let elapsed_seconds = elapsed_ms / 1000.0;
+            println!(
+                "query time: {:?} ({:?} ms) ({:.8} s)",
+                duration, elapsed_ms, elapsed_seconds
+            );
+
+            // Response
+            HttpResponse::Ok().json(AspNetUsersResponse {
+                users,
+                message: "Got all ASP.NET users.".to_string(),
+            })
         }
-    })
-    .fetch_all(&app_state.pool)
-    .await
-    .unwrap();
-
-    // stop timer & print to terminal
-    let duration = time.elapsed();
-    let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
-    let elapsed_seconds = elapsed_ms / 1000.0;
-    println!("query time: {:?} ({:?} ms) ({:.8} s)", duration, elapsed_ms, elapsed_seconds);
-
-    // Response
-    HttpResponse::Ok().json(AspNetUsersResponse {
-        users,
-        message: "Got all ASP.NET users.".to_string(),
-    })
+        Err(err) => {
+            // Handle the error and return an error response
+            eprintln!("Error fetching ASP.NET users: {:?}", err);
+            HttpResponse::InternalServerError().json(AspNetUsersResponse {
+                users: Vec::new(),
+                message: "Failed to fetch ASP.NET users.".to_string(),
+            })
+        }
+    }
 }
 
 /* test run: (MacOS Monterey, Intel i5 gen 7)
 
 (browser)
-query time: 1.815642ms (1.815642 ms) (0.00181564 s)
-query time: 979.749µs (0.979749 ms) (0.00097975 s)
-query time: 2.113846ms (2.113846 ms) (0.00211385 s)
-query time: 917.354µs (0.917354 ms) (0.00091735 s)
-query time: 940.898µs (0.940898 ms) (0.00094090 s)
-query time: 1.285944ms (1.285944 ms) (0.00128594 s)
-query time: 733.315µs (0.733315 ms) (0.00073332 s)
-query time: 793.339µs (0.793339 ms) (0.00079334 s)
-query time: 938.283µs (0.9382830000000001 ms) (0.00093828 s)
-query time: 811.194µs (0.811194 ms) (0.00081119 s)
-query time: 912.754µs (0.912754 ms) (0.00091275 s)
-query time: 878.41µs (0.87841 ms) (0.00087841 s)
-query time: 919.094µs (0.919094 ms) (0.00091909 s)
-query time: 859.317µs (0.859317 ms) (0.00085932 s)
-query time: 1.086166ms (1.086166 ms) (0.00108617 s)
-query time: 1.309113ms (1.309113 ms) (0.00130911 s)
-query time: 718.794µs (0.718794 ms) (0.00071879 s)
-query time: 988.377µs (0.988377 ms) (0.00098838 s)
-query time: 957.037µs (0.957037 ms) (0.00095704 s)
-query time: 780.863µs (0.780863 ms) (0.00078086 s)
-query time: 849.846µs (0.849846 ms) (0.00084985 s)
-query time: 814.967µs (0.814967 ms) (0.00081497 s)
-query time: 1.015065ms (1.015065 ms) (0.00101507 s)
-query time: 836.041µs (0.836041 ms) (0.00083604 s)
-query time: 1.306273ms (1.306273 ms) (0.00130627 s)
-query time: 1.821172ms (1.821172 ms) (0.00182117 s)
-query time: 847.772µs (0.847772 ms) (0.00084777 s)
+query time: 4.565839ms (4.565839 ms) (0.00456584 s)
+query time: 937.131µs (0.937131 ms) (0.00093713 s)
+query time: 756.638µs (0.756638 ms) (0.00075664 s)
+query time: 1.009978ms (1.0099779999999998 ms) (0.00100998 s)
+query time: 670.841µs (0.670841 ms) (0.00067084 s)
+query time: 653.499µs (0.6534989999999999 ms) (0.00065350 s)
+query time: 1.612772ms (1.6127719999999999 ms) (0.00161277 s)
+query time: 793.523µs (0.793523 ms) (0.00079352 s)
+query time: 1.056399ms (1.0563989999999999 ms) (0.00105640 s)
+query time: 1.012197ms (1.012197 ms) (0.00101220 s)
+query time: 640.147µs (0.640147 ms) (0.00064015 s)
+query time: 675.241µs (0.675241 ms) (0.00067524 s)
+query time: 1.62289ms (1.6228900000000002 ms) (0.00162289 s)
+query time: 1.563034ms (1.563034 ms) (0.00156303 s)
+query time: 1.082387ms (1.082387 ms) (0.00108239 s)
+query time: 1.423153ms (1.423153 ms) (0.00142315 s)
+query time: 768.672µs (0.768672 ms) (0.00076867 s)
+query time: 1.565801ms (1.565801 ms) (0.00156580 s)
 
 // result:
 {"users":[{"Id":"d60449d4-f1c2-43e9-a62f-ae087357fa05","UserName":"nguyentuan8a10ntk@gmail.com","Email":"nguyentuan8a10ntk@gmail.com","PasswordHash":"AQAAAAIAAYagAAAAEKxpBdIrGR6M67pLiiKJA1Jr9LRGHQ8/fln+oHWBvk96wsC4gatTOqyU6zyr76naZw=="}],"message":"Got all ASP.NET users."}
@@ -473,7 +471,7 @@ query time: 847.772µs (0.847772 ms) (0.00084777 s)
 
 
 
-/* 
+/*
 #[derive(Serialize, Deserialize)]
 struct CreateUserBody {
     username: String,
