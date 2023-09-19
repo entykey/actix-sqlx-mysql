@@ -12,7 +12,7 @@ use actix_web::{ HttpServer,
                  web };
 use serde::{ Serialize, Deserialize };
 use sqlx::mysql::{ MySqlConnection, MySqlPool, MySqlPoolOptions, MySqlQueryResult, MySqlRow };
-use sqlx::{FromRow, Connection};
+use sqlx::{FromRow, Connection, Row};
 use uuid::Uuid;
 
 
@@ -54,6 +54,14 @@ struct User {
                     //  If non-NULLABLE (NULL = yes, default = NULL) => error
 }
 
+// Define User struct with lifetimes for references
+// #[derive(Debug)]
+// struct User<'a> {
+//     id: &'a str,
+//     username: &'a str,
+//     email: &'a str, // Use Option<&str> for the email field
+// }
+
 #[derive(Serialize, Deserialize)]
 struct Response {
     message: String,
@@ -65,17 +73,31 @@ struct UserResponse {
     message: String,
 }
 
+// Define UserResponse struct with lifetimes for references
+// #[derive(Debug)]
+// struct UserResponse<'a> {
+//     user: User<'a>,
+//     message: &'static str,
+// }
+
 #[derive(Serialize, Deserialize)]
 struct UsersResponse {
     users: Vec<User>,
     message: String,
 }
 
+// Define UserResponse struct with lifetimes for references
+// #[derive(Debug)]
+// struct UsersResponse<'a> {
+//     users: Vec<User<'a>>,
+//     message: &'static str,
+// }
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 
     // let _database_url: String = env::var("DATABASE_URL").unwrap();
-    const DATABASE_URL: &str = "mysql://user:password@127.0.0.1:3306/actix_sqlx";
+    const DATABASE_URL: &str = "mysql://user:password@127.0.0.1:3306/BlazorServerCrud";   // "mysql://user:password@127.0.0.1:3306/actix_sqlx"
 
     /* Connecting to a database
      * for single connection:
@@ -99,12 +121,15 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(app_state.clone()))
             .route("/", web::get().to(root))
-            .route("/get/{user_id}", web::get().to(get_user))
-            .route("/get-all", web::get().to(get_all_users))
-            .route("/create", web::post().to(create_user))
-            .route("/patch", web::patch().to(patch_user))
-            .route("/delete", web::delete().to(delete_user))
-            .route("/demo", web::get().to(demo))
+            //.route("/get/{user_id}", web::get().to(get_user))
+            // .route("/get-all", web::get().to(get_all_users))
+            // .route("/create", web::post().to(create_user))
+            // .route("/patch", web::patch().to(patch_user))
+            // .route("/delete", web::delete().to(delete_user))
+            // .route("/demo", web::get().to(demo))
+
+            // AspNet Identity (other database):
+            .route("/get-aspnet-users", web::get().to(get_aspnet_users))
     }).bind(("127.0.0.1", 4000))?
         .run()
         .await
@@ -116,16 +141,19 @@ async fn root() -> HttpResponse {
     })
 }
 
-async fn demo(app_state: web::Data<AppState>) -> HttpResponse {
-    let things: Vec<Thing> = sqlx::query_as!(
-        Thing,
-        "SELECT * FROM things",
-    ).fetch_all(&app_state.pool).await.unwrap();
 
-    HttpResponse::Ok().json(things)
-}
+// async fn demo(app_state: web::Data<AppState>) -> HttpResponse {
+//     let things: Vec<Thing> = sqlx::query_as!(
+//         Thing,
+//         "SELECT * FROM things",
+//     ).fetch_all(&app_state.pool).await.unwrap();
+
+//     HttpResponse::Ok().json(things)
+// }
 
 
+
+/*
 async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpResponse {
     let user_id: i32 = path.into_inner(); 
     /* Queries
@@ -200,54 +228,102 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
         message: "Got user.".to_string(),
     })
 }
+*/
 
 
 
 // 3ms - 10ms (Postman)
 // works fine for NON-NULLABLE email        (MySQL col settings:  NULL = No, default = None) (accept email='')
 // panic on NULLABLE                        (MySQL col settings:  NULL = Yes, default = NULL) (accept email=NULL)
-async fn get_all_users(app_state: web::Data<AppState>) -> HttpResponse {
-    // timer
-    let time = std::time::Instant::now();
+// async fn get_all_users(app_state: web::Data<AppState>) -> HttpResponse {
+//     // timer
+//     let time = std::time::Instant::now();
 
-    // Fetch users, including those with NULL email
-    let mut users: Vec<User> = sqlx::query_as!(
-        User,
-        "SELECT * FROM users",
-    )
-    .fetch_all(&app_state.pool)
-    .await
-    .unwrap();
-
-    
-    // Modify the email field directly within the User struct
-    // for user in users.iter_mut() {
-    //     if user.email.is_empty() {
-    //         user.email = "Not Provided".to_string(); 
-    //     }
-    // }
+//     // Fetch users, including those with NULL email
+//     let mut users: Vec<User> = sqlx::query_as!(
+//         User,
+//         "SELECT * FROM users",
+//     )
+//     .fetch_all(&app_state.pool)
+//     .await
+//     .unwrap();
 
     
-    // Modify the email field directly within the User struct using functional style
-    // More performance than for loop (tested with 5 duplications of looping code)
-    users.iter_mut().for_each(|user| {
-        if user.email.is_empty() {
-            user.email = "Not Provided".to_string();    // Map empty email to "null" string
-        }
-    });
+//     // Modify the email field directly within the User struct
+//     // for user in users.iter_mut() {
+//     //     if user.email.is_empty() {
+//     //         user.email = "Not Provided".to_string(); 
+//     //     }
+//     // }
 
-    // stop timer & print to terminal
-    let duration = time.elapsed();
-    let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
-    let elapsed_seconds = elapsed_ms / 1000.0;
-    println!("query time: {:?} ({:?} ms) ({:.8} s)", duration, elapsed_ms, elapsed_seconds);
+    
+//     // Modify the email field directly within the User struct using functional style
+//     // More performance than for loop (tested with 5 duplications of looping code)
+//     users.iter_mut().for_each(|user| {
+//         if user.email.is_empty() {
+//             user.email = "Not Provided".to_string();    // Map empty email to "null" string
+//         }
+//     });
 
-    // Response
-    HttpResponse::Ok().json(UsersResponse {
-        users,
-        message: "Got all users.".to_string(),
-    })
-}
+//     // stop timer & print to terminal
+//     let duration = time.elapsed();
+//     let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+//     let elapsed_seconds = elapsed_ms / 1000.0;
+//     println!("query time: {:?} ({:?} ms) ({:.8} s)", duration, elapsed_ms, elapsed_seconds);
+
+//     // Response
+//     HttpResponse::Ok().json(UsersResponse {
+//         users,
+//         message: "Got all users.".to_string(),
+//     })
+// }
+
+
+
+// lifetime trial - failed, near sqlx::... expected &str, but found String
+// async fn get_all_users(app_state: web::Data<AppState>) -> HttpResponse {
+//     // timer
+//     let time = std::time::Instant::now();
+
+//     // Fetch users, including those with NULL email
+//     let users: Vec<User> = sqlx::query_as!(
+//         User,
+//         "SELECT * FROM users",
+//     )
+//     .fetch_all(&app_state.pool)
+//     .await
+//     .unwrap();
+
+//     // Modify the email field directly within the User struct using lifetimes
+//     let users_with_updated_email: Vec<User> = users
+//         .iter()
+//         .map(|user| User {
+//             id: user.id,
+//             username: user.username,
+//             email: if let Some(email) = user.email {
+//                 if email.is_empty() {
+//                     Some("Not Provided")
+//                 } else {
+//                     Some(email)
+//                 }
+//             } else {
+//                 Some("Not Provided")
+//             },
+//         })
+//         .collect();
+
+//     // stop timer & print to terminal
+//     let duration = time.elapsed();
+//     let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+//     let elapsed_seconds = elapsed_ms / 1000.0;
+//     println!("query time: {:?} ({:?} ms) ({:.8} s)", duration, elapsed_ms, elapsed_seconds);
+
+//     // Response
+//     HttpResponse::Ok().json(UsersResponse {
+//         users: users_with_updated_email,
+//         message: "Got all users.",
+//     })
+// }
 
 
 /* test run: (windows 10, Intel i5 gen 10)
@@ -279,7 +355,7 @@ query time: 991.9µs (0.9919 ms) (0.00099190 s)
 query time: 1.2514ms (1.2513999999999998 ms) (0.00125140 s)
 */
 
-/* test run :(MacOS Monterey, Intel i5 gen 7)
+/* test run : (MacOS Monterey, Intel i5 gen 7)
 
 (Chrome)
 query time: 13.354221ms (13.354220999999999 ms) (0.01335422 s)
@@ -309,6 +385,95 @@ query time: 1.162814ms (1.162814 ms) (0.00116281 s)
 
 
 
+
+#[allow(non_snake_case)]
+#[derive(Debug, Serialize, Deserialize)]
+struct AspNetUser {
+    Id: String,
+    UserName: String,
+    Email: String,
+    PasswordHash: String,
+}
+#[allow(non_snake_case)]
+#[derive(Serialize, Deserialize)]
+struct AspNetUsersResponse {
+    users: Vec<AspNetUser>,
+    message: String
+}
+
+async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
+    // timer
+    let time = std::time::Instant::now();
+
+    // Fetch users, including those with NULL email
+    let mut users: Vec<AspNetUser> = sqlx::query(
+        "SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM Users u",
+    )
+    .map(|user: sqlx::mysql::MySqlRow|{
+        AspNetUser {
+            Id: user.get(0),
+            UserName: user.get(1),
+            Email: user.get(2),
+            PasswordHash: user.get(3),
+        }
+    })
+    .fetch_all(&app_state.pool)
+    .await
+    .unwrap();
+
+    // stop timer & print to terminal
+    let duration = time.elapsed();
+    let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+    let elapsed_seconds = elapsed_ms / 1000.0;
+    println!("query time: {:?} ({:?} ms) ({:.8} s)", duration, elapsed_ms, elapsed_seconds);
+
+    // Response
+    HttpResponse::Ok().json(AspNetUsersResponse {
+        users,
+        message: "Got all ASP.NET users.".to_string(),
+    })
+}
+
+/* test run: (MacOS Monterey, Intel i5 gen 7)
+
+(browser)
+query time: 1.815642ms (1.815642 ms) (0.00181564 s)
+query time: 979.749µs (0.979749 ms) (0.00097975 s)
+query time: 2.113846ms (2.113846 ms) (0.00211385 s)
+query time: 917.354µs (0.917354 ms) (0.00091735 s)
+query time: 940.898µs (0.940898 ms) (0.00094090 s)
+query time: 1.285944ms (1.285944 ms) (0.00128594 s)
+query time: 733.315µs (0.733315 ms) (0.00073332 s)
+query time: 793.339µs (0.793339 ms) (0.00079334 s)
+query time: 938.283µs (0.9382830000000001 ms) (0.00093828 s)
+query time: 811.194µs (0.811194 ms) (0.00081119 s)
+query time: 912.754µs (0.912754 ms) (0.00091275 s)
+query time: 878.41µs (0.87841 ms) (0.00087841 s)
+query time: 919.094µs (0.919094 ms) (0.00091909 s)
+query time: 859.317µs (0.859317 ms) (0.00085932 s)
+query time: 1.086166ms (1.086166 ms) (0.00108617 s)
+query time: 1.309113ms (1.309113 ms) (0.00130911 s)
+query time: 718.794µs (0.718794 ms) (0.00071879 s)
+query time: 988.377µs (0.988377 ms) (0.00098838 s)
+query time: 957.037µs (0.957037 ms) (0.00095704 s)
+query time: 780.863µs (0.780863 ms) (0.00078086 s)
+query time: 849.846µs (0.849846 ms) (0.00084985 s)
+query time: 814.967µs (0.814967 ms) (0.00081497 s)
+query time: 1.015065ms (1.015065 ms) (0.00101507 s)
+query time: 836.041µs (0.836041 ms) (0.00083604 s)
+query time: 1.306273ms (1.306273 ms) (0.00130627 s)
+query time: 1.821172ms (1.821172 ms) (0.00182117 s)
+query time: 847.772µs (0.847772 ms) (0.00084777 s)
+
+// result:
+{"users":[{"Id":"d60449d4-f1c2-43e9-a62f-ae087357fa05","UserName":"nguyentuan8a10ntk@gmail.com","Email":"nguyentuan8a10ntk@gmail.com","PasswordHash":"AQAAAAIAAYagAAAAEKxpBdIrGR6M67pLiiKJA1Jr9LRGHQ8/fln+oHWBvk96wsC4gatTOqyU6zyr76naZw=="}],"message":"Got all ASP.NET users."}
+
+*/
+
+
+
+
+/* 
 #[derive(Serialize, Deserialize)]
 struct CreateUserBody {
     username: String,
@@ -405,3 +570,4 @@ async fn delete_user(body: web::Json<DeleteUserBody>, app_state: web::Data<AppSt
         message: "Deleted the user.".to_string(),
     })
 }
+*/
