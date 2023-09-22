@@ -339,26 +339,6 @@ impl From<MySqlDatabaseError> for CustomError {
 impl CustomError {
     fn to_http_response(&self) -> HttpResponse {
         match self {
-            // CustomError::Sqlx(error) => {
-            //     HttpResponse::InternalServerError().json(format!(
-            //         "SQLx error: {}",
-            //         error.clone()
-            //     ))
-            // }
-
-
-            // CustomError::Sqlx(error) => {
-            //     // Serialize the SQLx error as an object
-            //     let sqlx_error_response = SqlxErrorResponse {
-            //         //code: error.code().map(|code| code.to_string()),
-            //         code: Some("trying it..".to_string(),
-            //         message: error.to_string(),
-            //     };
-
-            //     // Serialize the custom response as JSON
-            //     HttpResponse::InternalServerError().json(sqlx_error_response)
-            // }
-
             CustomError::Sqlx(error) => {
                 // (Extracting Error Code: In your original code, you were trying to call the
                 // code method on the SqlxError type. However, it appears that code is not a method directly available on SqlxError.
@@ -515,24 +495,6 @@ async fn authenticate_user(
     let time = std::time::Instant::now();
 
     match fetch_one_aspnet_user(app_state, &auth_request.username_or_email).await {
-        // Ok(Some(user)) => {
-        //     // stop timer & print to terminal
-        //     let duration = time.elapsed();
-        //     let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
-        //     let elapsed_seconds = elapsed_ms / 1000.0;
-        //     println!(
-        //         "query time: {:?} ({:?} ms) ({:.8} s)",
-        //         duration, elapsed_ms, elapsed_seconds
-        //     );
-
-
-        //     // User found, return the user.
-        //     HttpResponse::Ok().json(AspNetUsersResponse {
-        //         users: vec![user],
-        //         message: "Found user.".to_string(),
-        //     })
-        // }
-
         Ok(Some(user)) => {
             // Verify the password
             if verify_password_with_sha256_with_salt(
