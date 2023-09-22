@@ -24,5 +24,13 @@ pub mod models {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct AuthRequest {
         pub username_or_email: String,
+        pub password: String,
+    }
+    
+    #[derive(Debug, Serialize, Deserialize)]
+    pub enum AuthResult {
+        Success(AspNetUser), // Authentication succeeded
+        InvalidCredentials, // Invalid username/email or password
+        DatabaseError(String), // Database error
     }
 }

@@ -10,27 +10,20 @@ use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlConnection, MySqlPool, MySqlPoolOptions, MySqlQueryResult, MySqlRow};
 use sqlx::{Connection, FromRow, Row};
+use sqlx::{Error as SqlxError, mysql::MySqlDatabaseError};
 use uuid::Uuid;
 
 // define modules & import
 mod models; // Create a new module named "models" by convention
-use models::models::{AspNetUser, AspNetUsersResponse, AuthRequest}; // Specify the correct module path
+use models::models::{AspNetUser, AspNetUsersResponse,
+    AuthRequest, AuthResult}; // Specify the correct module path
+
+mod hasher;
+use hasher::hasher::{verify_password_with_sha256_with_salt};
 
 #[derive(Clone)]
 struct AppState {
     pool: MySqlPool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Thing {
-    id: u64,
-    i_8: i8,
-    i_16: i16,
-    i_32: i32,
-    i_64: i64,
-    f: f32,
-    f_double: f64,
-    string: String,
 }
 
 /*
@@ -97,7 +90,7 @@ struct UsersResponse {
 async fn main() -> std::io::Result<()> {
 
     // let _database_url: String = env::var("DATABASE_URL").unwrap();
-    const DATABASE_URL: &str = "mysql://user:password@127.0.0.1:3306/BlazorServerCrud"; // "mysql://user:password@127.0.0.1:3306/actix_sqlx"
+    const DATABASE_URL: &str = "mysql://user:password@127.0.0.1:3306/consume_actix_api"; // "mysql://user:password@127.0.0.1:3306/actix_sqlx"
 
     /* Connecting to a database
      * for single connection:
@@ -121,12 +114,6 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(app_state.clone()))
             .route("/", web::get().to(root))
-            //.route("/get/{user_id}", web::get().to(get_user))
-            // .route("/get-all", web::get().to(get_all_users))
-            // .route("/create", web::post().to(create_user))
-            // .route("/patch", web::patch().to(patch_user))
-            // .route("/delete", web::delete().to(delete_user))
-            // .route("/demo", web::get().to(demo))
 
             // AspNet Identity (other database):
             .route("/get-aspnet-users", web::get().to(get_aspnet_users))
@@ -142,16 +129,6 @@ async fn root() -> HttpResponse {
         message: "Server is up and running.".to_string(),
     })
 }
-
-
-// async fn demo(app_state: web::Data<AppState>) -> HttpResponse {
-//     let things: Vec<Thing> = sqlx::query_as!(
-//         Thing,
-//         "SELECT * FROM things",
-//     ).fetch_all(&app_state.pool).await.unwrap();
-
-//     HttpResponse::Ok().json(things)
-// }
 
 
 
@@ -326,71 +303,108 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
 //     })
 // }
 
-/* test run: (windows 10, Intel i5 gen 10)
-query time: 1.6042ms (1.6042 ms) (0.00160420 s)
-query time: 1.2359ms (1.2359 ms) (0.00123590 s)
-query time: 995.5µs (0.9955 ms) (0.00099550 s)
-query time: 1.0672ms (1.0672 ms) (0.00106720 s)
-query time: 977.1µs (0.9771000000000001 ms) (0.00097710 s)
-query time: 949.9µs (0.9499000000000001 ms) (0.00094990 s)
-query time: 1.0364ms (1.0364 ms) (0.00103640 s)
-query time: 1.1089ms (1.1089 ms) (0.00110890 s)
-query time: 1.2713ms (1.2712999999999999 ms) (0.00127130 s)
-query time: 1.0145ms (1.0145 ms) (0.00101450 s)
-query time: 897.7µs (0.8976999999999999 ms) (0.00089770 s)
-query time: 1.377ms (1.377 ms) (0.00137700 s)
-query time: 1.3461ms (1.3461 ms) (0.00134610 s)
-query time: 1.0744ms (1.0744 ms) (0.00107440 s)
-query time: 1.4353ms (1.4353 ms) (0.00143530 s)
-query time: 1.053ms (1.053 ms) (0.00105300 s)
-query time: 986.3µs (0.9863000000000001 ms) (0.00098630 s)
-query time: 924.8µs (0.9248000000000001 ms) (0.00092480 s)
-query time: 1.2397ms (1.2397 ms) (0.00123970 s)
-query time: 1.0165ms (1.0165 ms) (0.00101650 s)
-query time: 885.2µs (0.8852000000000001 ms) (0.00088520 s)
-query time: 1.1683ms (1.1683 ms) (0.00116830 s)
-query time: 962.8µs (0.9628 ms) (0.00096280 s)
-query time: 991.4µs (0.9914 ms) (0.00099140 s)
-query time: 991.9µs (0.9919 ms) (0.00099190 s)
-query time: 1.2514ms (1.2513999999999998 ms) (0.00125140 s)
-*/
-
-/* test run : (MacOS Monterey, Intel i5 gen 7)
-
-(Chrome)
-query time: 13.354221ms (13.354220999999999 ms) (0.01335422 s)
-query time: 1.134404ms (1.1344040000000002 ms) (0.00113440 s)
-query time: 1.913823ms (1.913823 ms) (0.00191382 s)
-query time: 1.098089ms (1.098089 ms) (0.00109809 s)
-query time: 1.141108ms (1.141108 ms) (0.00114111 s)
-query time: 1.235515ms (1.235515 ms) (0.00123551 s)
-query time: 917.211µs (0.917211 ms) (0.00091721 s)
-query time: 1.224723ms (1.224723 ms) (0.00122472 s)
-query time: 1.023464ms (1.023464 ms) (0.00102346 s)
-query time: 995.447µs (0.995447 ms) (0.00099545 s)
-
-(Postman)
-query time: 6.629898ms (6.629898000000001 ms) (0.00662990 s)
-query time: 3.20108ms (3.2010799999999997 ms) (0.00320108 s)
-query time: 1.436492ms (1.4364919999999999 ms) (0.00143649 s)
-query time: 1.543356ms (1.5433560000000002 ms) (0.00154336 s)
-query time: 918.798µs (0.918798 ms) (0.00091880 s)
-query time: 16.498128ms (16.498128 ms) (0.01649813 s)
-query time: 1.844631ms (1.844631 ms) (0.00184463 s)
-query time: 915.22µs (0.91522 ms) (0.00091522 s)
-query time: 989.985µs (0.9899850000000001 ms) (0.00098999 s)
-query time: 876.679µs (0.876679 ms) (0.00087668 s)
-query time: 1.162814ms (1.162814 ms) (0.00116281 s)
-*/
 
 
 
 
+
+// Custom struct for serializing SQLx errors
+#[derive(Debug, Serialize)] // Derive the Serialize trait for JSON serialization
+struct SqlxErrorResponse {
+    code: Option<String>,
+    message: String,
+}
+// Define a custom error type
+#[derive(Debug)]
+enum CustomError {
+    Sqlx(SqlxError),
+    Database(MySqlDatabaseError),
+    NotFound,
+}
+
+// Implement From for SqlxError
+impl From<SqlxError> for CustomError {
+    fn from(error: SqlxError) -> Self {
+        CustomError::Sqlx(error)
+    }
+}
+
+// Implement From for MySqlDatabaseError
+impl From<MySqlDatabaseError> for CustomError {
+    fn from(error: MySqlDatabaseError) -> Self {
+        CustomError::Database(error)
+    }
+}
+
+impl CustomError {
+    fn to_http_response(&self) -> HttpResponse {
+        match self {
+            // CustomError::Sqlx(error) => {
+            //     HttpResponse::InternalServerError().json(format!(
+            //         "SQLx error: {}",
+            //         error.clone()
+            //     ))
+            // }
+
+
+            // CustomError::Sqlx(error) => {
+            //     // Serialize the SQLx error as an object
+            //     let sqlx_error_response = SqlxErrorResponse {
+            //         //code: error.code().map(|code| code.to_string()),
+            //         code: Some("trying it..".to_string(),
+            //         message: error.to_string(),
+            //     };
+
+            //     // Serialize the custom response as JSON
+            //     HttpResponse::InternalServerError().json(sqlx_error_response)
+            // }
+
+            CustomError::Sqlx(error) => {
+                // (Extracting Error Code: In your original code, you were trying to call the
+                // code method on the SqlxError type. However, it appears that code is not a method directly available on SqlxError.
+                // To extract the error code from a SqlxError, we need to do some pattern matching to check if 
+                // the error is actually a SqlxError::Database variant, which provides access to the underlying
+                // database-specific error (in this case, a MySqlDatabaseError).)
+
+                // Extract the error code from the SqlxError, if available:
+                let code = match error {
+                    SqlxError::Database(db_error) => db_error.code(),
+
+                    // Here, we use a match statement to check the type of the error variable. If it's a SqlxError::Database, we extract the error code using db_error.code(). If it's not a database error, we set the code to None.
+                    _ => None,
+                };
+
+                // Custom Error Response: Once we have extracted the error code (if available),
+                // we create a custom error response struct SqlxErrorResponse that includes both the error code and message.
+                
+                // Serialize the SQLx error as an object:
+                let sqlx_error_response = SqlxErrorResponse {
+                    // Here, we use the map function to convert the optional code (which could be Some(code) or None) to a String. This allows us to include the error code in the response as a string.
+                    code: code.map(|code| code.to_string()),
+                    message: error.to_string(),
+                };
+
+                // Serialize the custom response as JSON
+                HttpResponse::InternalServerError().json(sqlx_error_response)
+            }
+            CustomError::Database(db_error) => {
+                // Customize the response based on the database error.
+                HttpResponse::InternalServerError().json(format!(
+                    "Database error: {}",
+                    db_error.message(),
+                ))
+            }
+            CustomError::NotFound => {
+                HttpResponse::NotFound().json("No account exists with the given credentials.")
+            }
+        }
+    }
+}
 
 // Define the private function to fetch ASP.NET users (Repository)
 async fn fetch_aspnet_users(pool: &MySqlPool) -> Result<Vec<AspNetUser>, sqlx::Error> {
     let users: Vec<AspNetUser> =
-        sqlx::query("SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM Users u")
+        sqlx::query("SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM AspNetUsers u")
             .map(|user: sqlx::mysql::MySqlRow| {
                 AspNetUser {
                     Id: user.get(0), // must add 'use sqlx::Row' !!
@@ -431,43 +445,33 @@ async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
                 message: "Got all ASP.NET users.".to_string(),
             })
         }
+        // Err(err) => {
+        //     // Handle the error and return an error response
+        //     eprintln!("Error fetching ASP.NET users: {:?}", err);
+        //     HttpResponse::InternalServerError().json(AspNetUsersResponse {
+        //         users: Vec::new(),
+        //         message: "Failed to fetch ASP.NET users.".to_string(),
+        //     })
+        // }
         Err(err) => {
-            // Handle the error and return an error response
+            // Wrap the error and return an error response
             eprintln!("Error fetching ASP.NET users: {:?}", err);
-            HttpResponse::InternalServerError().json(AspNetUsersResponse {
-                users: Vec::new(),
-                message: "Failed to fetch ASP.NET users.".to_string(),
-            })
+
+            let custom_err: CustomError = err.into();
+            custom_err.to_http_response()
         }
     }
 }
 
 /* test run: (MacOS Monterey, Intel i5 gen 7)
 
-(browser)
-query time: 4.565839ms (4.565839 ms) (0.00456584 s)
-query time: 937.131µs (0.937131 ms) (0.00093713 s)
-query time: 756.638µs (0.756638 ms) (0.00075664 s)
-query time: 1.009978ms (1.0099779999999998 ms) (0.00100998 s)
-query time: 670.841µs (0.670841 ms) (0.00067084 s)
-query time: 653.499µs (0.6534989999999999 ms) (0.00065350 s)
-query time: 1.612772ms (1.6127719999999999 ms) (0.00161277 s)
-query time: 793.523µs (0.793523 ms) (0.00079352 s)
-query time: 1.056399ms (1.0563989999999999 ms) (0.00105640 s)
-query time: 1.012197ms (1.012197 ms) (0.00101220 s)
-query time: 640.147µs (0.640147 ms) (0.00064015 s)
-query time: 675.241µs (0.675241 ms) (0.00067524 s)
-query time: 1.62289ms (1.6228900000000002 ms) (0.00162289 s)
-query time: 1.563034ms (1.563034 ms) (0.00156303 s)
-query time: 1.082387ms (1.082387 ms) (0.00108239 s)
-query time: 1.423153ms (1.423153 ms) (0.00142315 s)
-query time: 768.672µs (0.768672 ms) (0.00076867 s)
-query time: 1.565801ms (1.565801 ms) (0.00156580 s)
-
-// result:
+// success result:
 {"users":[{"Id":"d60449d4-f1c2-43e9-a62f-ae087357fa05","UserName":"nguyentuan8a10ntk@gmail.com","Email":"nguyentuan8a10ntk@gmail.com","PasswordHash":"AQAAAAIAAYagAAAAEKxpBdIrGR6M67pLiiKJA1Jr9LRGHQ8/fln+oHWBvk96wsC4gatTOqyU6zyr76naZw=="}],"message":"Got all ASP.NET users."}
 
+// server error result (wrong table name):
+{"code":"42S02","message":"error returned from database: 1146 (42S02): Table 'consume_actix_api.aspnetuses' doesn't exist"}
 */
+
 
 
 
@@ -478,7 +482,7 @@ async fn fetch_one_aspnet_user(
     username_or_email: &str,
 ) -> Result<Option<AspNetUser>, sqlx::Error> {
     let user: Result<Option<AspNetUser>, sqlx::Error> = match sqlx::query(
-        "SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM Users u WHERE u.UserName = ? OR u.Email = ?",
+        "SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM AspNetUsers u WHERE u.UserName = ? OR u.Email = ?",
     )
     .bind(username_or_email)
     .bind(username_or_email)
@@ -511,22 +515,45 @@ async fn authenticate_user(
     let time = std::time::Instant::now();
 
     match fetch_one_aspnet_user(app_state, &auth_request.username_or_email).await {
+        // Ok(Some(user)) => {
+        //     // stop timer & print to terminal
+        //     let duration = time.elapsed();
+        //     let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+        //     let elapsed_seconds = elapsed_ms / 1000.0;
+        //     println!(
+        //         "query time: {:?} ({:?} ms) ({:.8} s)",
+        //         duration, elapsed_ms, elapsed_seconds
+        //     );
+
+
+        //     // User found, return the user.
+        //     HttpResponse::Ok().json(AspNetUsersResponse {
+        //         users: vec![user],
+        //         message: "Found user.".to_string(),
+        //     })
+        // }
+
         Ok(Some(user)) => {
-            // stop timer & print to terminal
-            let duration = time.elapsed();
-            let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
-            let elapsed_seconds = elapsed_ms / 1000.0;
-            println!(
-                "query time: {:?} ({:?} ms) ({:.8} s)",
-                duration, elapsed_ms, elapsed_seconds
-            );
+            // Verify the password
+            if verify_password_with_sha256_with_salt(
+                &auth_request.password,
+                &user.PasswordHash,
+            ) {
+                // Stop timer & print to terminal
+                let duration = time.elapsed();
+                let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+                let elapsed_seconds = elapsed_ms / 1000.0;
+                println!(
+                    "query time: {:?} ({:?} ms) ({:.8} s)",
+                    duration, elapsed_ms, elapsed_seconds
+                );
 
-
-            // User found, return the user.
-            HttpResponse::Ok().json(AspNetUsersResponse {
-                users: vec![user],
-                message: "Found user.".to_string(),
-            })
+                // User found and password is correct, return the user.
+                HttpResponse::Ok().json(AuthResult::Success(user))
+            } else {
+                // Password is incorrect
+                HttpResponse::Ok().json(AuthResult::InvalidCredentials)
+            }
         }
         Ok(None) => {
             // stop timer & print to terminal
@@ -545,10 +572,17 @@ async fn authenticate_user(
                 message: "No account exists with the given credentials.".to_string(),
             })
         }
+        // Err(err) => {
+        //     // Handle the error, you can return an internal server error or customize it as needed.
+        //     println!("Hey, Caught An Error: {:?}", err);
+        //     HttpResponse::InternalServerError().finish()
+        // }
         Err(err) => {
-            // Handle the error, you can return an internal server error or customize it as needed.
-            println!("Hey, Caught An Error: {:?}", err);
-            HttpResponse::InternalServerError().finish()
+            // Wrap the error and return an error response
+            eprintln!("Error fetching ASP.NET user: {:?}", err);
+
+            let custom_err: CustomError = err.into();
+            custom_err.to_http_response()
         }
     }
 }

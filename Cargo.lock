@@ -186,8 +186,11 @@ name = "actix_sqlx_mysql"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "base64",
  "futures",
+ "rand",
  "serde",
+ "sha2",
  "sqlx",
  "uuid",
 ]
