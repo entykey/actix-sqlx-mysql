@@ -7,19 +7,25 @@
 // Run: $ sudo /Applications/XAMPP/xamppfiles/bin/mysql_upgrade
 
 use actix_web::{web, App, HttpResponse, HttpServer};
+use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
-use sqlx::mysql::{MySqlConnection, MySqlPool, MySqlPoolOptions, MySqlQueryResult, MySqlRow};
-use sqlx::{Connection, FromRow, Row};
-use sqlx::{Error as SqlxError, mysql::MySqlDatabaseError};
+use serde_json::json;
+use sqlx::mysql::{MySqlConnection, MySqlPool, 
+    MySqlPoolOptions, MySqlDatabaseError, MySqlQueryResult, MySqlRow};
+use sqlx::Row;
 use uuid::Uuid;
 
 // define modules & import
 mod models; // Create a new module named "models" by convention
 use models::models::{AspNetUser, AspNetUsersResponse,
-    AuthRequest, AuthResult}; // Specify the correct module path
+    AuthRequest, AuthResponse}; // Specify the correct module path
 
 mod hasher;
 use hasher::hasher::{verify_password_with_sha256_with_salt};
+
+mod custom_error;
+use custom_error::custom_error::{SqlxErrorResponse, CustomError};
+
 
 #[derive(Clone)]
 struct AppState {
@@ -38,53 +44,42 @@ struct User {
 }
 */
 // Non-NULLABLE email, (empty string by default)
+// #[derive(Debug, Serialize, Deserialize)]
+// struct User {
+//     //id: i32,
+//     id: String,
+//     username: String,
+//     email: String, // (MySQL col settings:  NULL = No, default = None) (accept Non-NULL)
+//                    //  If non-NULLABLE (NULL = yes, default = NULL) => error
+// }
+
+// Non-NULLABLE email
 #[derive(Debug, Serialize, Deserialize)]
-struct User {
-    //id: i32,
-    id: String,
-    username: String,
-    email: String, // (MySQL col settings:  NULL = No, default = None) (accept Non-NULL)
-                   //  If non-NULLABLE (NULL = yes, default = NULL) => error
-}
-
-// Define User struct with lifetimes for references
-// #[derive(Debug)]
-// struct User<'a> {
-//     id: &'a str,
-//     username: &'a str,
-//     email: &'a str, // Use Option<&str> for the email field
-// }
-
-#[derive(Serialize, Deserialize)]
-struct Response {
-    message: String,
+struct User<'a> {
+    id: &'a str,
+    username: &'a str,
+    email: &'a str, // (MySQL col settings:  NULL = No, default = None) (accept Non-NULL)
+                    //  If non-NULLABLE (NULL = yes, default = NULL) => error
 }
 
 #[derive(Serialize, Deserialize)]
-struct UserResponse {
-    user: User,
+struct ApiResponse {
     message: String,
 }
 
 // Define UserResponse struct with lifetimes for references
-// #[derive(Debug)]
-// struct UserResponse<'a> {
-//     user: User<'a>,
-//     message: &'static str,
-// }
-
-#[derive(Serialize, Deserialize)]
-struct UsersResponse {
-    users: Vec<User>,
-    message: String,
+#[derive(Debug)]
+struct UserResponse<'a> {
+    user: User<'a>,
+    message: &'static str,
 }
 
 // Define UserResponse struct with lifetimes for references
-// #[derive(Debug)]
-// struct UsersResponse<'a> {
-//     users: Vec<User<'a>>,
-//     message: &'static str,
-// }
+#[derive(Debug)]
+struct UsersResponse<'a> {
+    users: Vec<User<'a>>,
+    message: &'static str,
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -108,10 +103,13 @@ async fn main() -> std::io::Result<()> {
         .await
         .unwrap();
 
-    let app_state = AppState { pool };
+    let app_state: AppState = AppState { pool };
 
     HttpServer::new(move || {
         App::new()
+            // Allow all origins, methods, request headers and exposed headers allowed. Credentials supported. Max age 1 hour. Does not send wildcard.
+            .wrap(Cors::permissive())
+
             .app_data(web::Data::new(app_state.clone()))
             .route("/", web::get().to(root))
 
@@ -125,7 +123,7 @@ async fn main() -> std::io::Result<()> {
 }
 
 async fn root() -> HttpResponse {
-    HttpResponse::Ok().json(Response {
+    HttpResponse::Ok().json(ApiResponse {
         message: "Server is up and running.".to_string(),
     })
 }
@@ -308,79 +306,6 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
 
 
 
-// Custom struct for serializing SQLx errors
-#[derive(Debug, Serialize)] // Derive the Serialize trait for JSON serialization
-struct SqlxErrorResponse {
-    code: Option<String>,
-    message: String,
-}
-// Define a custom error type
-#[derive(Debug)]
-enum CustomError {
-    Sqlx(SqlxError),
-    Database(MySqlDatabaseError),
-    NotFound,
-}
-
-// Implement From for SqlxError
-impl From<SqlxError> for CustomError {
-    fn from(error: SqlxError) -> Self {
-        CustomError::Sqlx(error)
-    }
-}
-
-// Implement From for MySqlDatabaseError
-impl From<MySqlDatabaseError> for CustomError {
-    fn from(error: MySqlDatabaseError) -> Self {
-        CustomError::Database(error)
-    }
-}
-
-impl CustomError {
-    fn to_http_response(&self) -> HttpResponse {
-        match self {
-            CustomError::Sqlx(error) => {
-                // (Extracting Error Code: In your original code, you were trying to call the
-                // code method on the SqlxError type. However, it appears that code is not a method directly available on SqlxError.
-                // To extract the error code from a SqlxError, we need to do some pattern matching to check if 
-                // the error is actually a SqlxError::Database variant, which provides access to the underlying
-                // database-specific error (in this case, a MySqlDatabaseError).)
-
-                // Extract the error code from the SqlxError, if available:
-                let code = match error {
-                    SqlxError::Database(db_error) => db_error.code(),
-
-                    // Here, we use a match statement to check the type of the error variable. If it's a SqlxError::Database, we extract the error code using db_error.code(). If it's not a database error, we set the code to None.
-                    _ => None,
-                };
-
-                // Custom Error Response: Once we have extracted the error code (if available),
-                // we create a custom error response struct SqlxErrorResponse that includes both the error code and message.
-                
-                // Serialize the SQLx error as an object:
-                let sqlx_error_response = SqlxErrorResponse {
-                    // Here, we use the map function to convert the optional code (which could be Some(code) or None) to a String. This allows us to include the error code in the response as a string.
-                    code: code.map(|code| code.to_string()),
-                    message: error.to_string(),
-                };
-
-                // Serialize the custom response as JSON
-                HttpResponse::InternalServerError().json(sqlx_error_response)
-            }
-            CustomError::Database(db_error) => {
-                // Customize the response based on the database error.
-                HttpResponse::InternalServerError().json(format!(
-                    "Database error: {}",
-                    db_error.message(),
-                ))
-            }
-            CustomError::NotFound => {
-                HttpResponse::NotFound().json("No account exists with the given credentials.")
-            }
-        }
-    }
-}
-
 // Define the private function to fetch ASP.NET users (Repository)
 async fn fetch_aspnet_users(pool: &MySqlPool) -> Result<Vec<AspNetUser>, sqlx::Error> {
     let users: Vec<AspNetUser> =
@@ -402,18 +327,18 @@ async fn fetch_aspnet_users(pool: &MySqlPool) -> Result<Vec<AspNetUser>, sqlx::E
 // HTTP handler for getting al AspNetUser (controller)
 async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
     // timer
-    let time = std::time::Instant::now();
+    let time: std::time::Instant = std::time::Instant::now();
 
     // Fetch ASP.NET users using the private function
-    let users_result = fetch_aspnet_users(&app_state.pool).await;
+    let users_result: Result<Vec<AspNetUser>, sqlx::Error> = fetch_aspnet_users(&app_state.pool).await;
 
     // Handle the result or return an error response
     match users_result {
-        Ok(users) => {
+        Ok(users) => {  // : Vec<AspNetUser>
             // stop timer & print to terminal
-            let duration = time.elapsed();
+            let duration: std::time::Duration = time.elapsed();
             let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
-            let elapsed_seconds = elapsed_ms / 1000.0;
+            let elapsed_seconds: f64 = elapsed_ms / 1000.0;
             println!(
                 "query time: {:?} ({:?} ms) ({:.8} s)",
                 duration, elapsed_ms, elapsed_seconds
@@ -486,15 +411,16 @@ async fn fetch_one_aspnet_user(
     user
 }
 
+
 // Handler for user authentication.
 async fn authenticate_user(
     app_state: web::Data<AppState>,
     auth_request: web::Json<AuthRequest>, // Use the request model.
 ) -> HttpResponse {
     // timer
-    let time = std::time::Instant::now();
+    let time: std::time::Instant = std::time::Instant::now();
 
-    match fetch_one_aspnet_user(app_state, &auth_request.username_or_email).await {
+    match fetch_one_aspnet_user(app_state.clone(), &auth_request.username_or_email).await {
         Ok(Some(user)) => {
             // Verify the password
             if verify_password_with_sha256_with_salt(
@@ -504,29 +430,37 @@ async fn authenticate_user(
                 // Stop timer & print to terminal
                 let duration = time.elapsed();
                 let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
-                let elapsed_seconds = elapsed_ms / 1000.0;
+                let elapsed_seconds: f64 = elapsed_ms / 1000.0;
                 println!(
                     "query time: {:?} ({:?} ms) ({:.8} s)",
                     duration, elapsed_ms, elapsed_seconds
                 );
 
-                // User found and password is correct, return the user.
-                HttpResponse::Ok().json(AuthResult::Success(user))
+                // Authentication succeeded
+                let access_token = "your_generated_access_token".to_string(); // Replace with your logic
+                let refresh_token = "your_generated_refresh_token".to_string(); // Replace with your logic
+
+                let response = AuthResponse::success(user, access_token, refresh_token);
+
+                // Return the response
+                HttpResponse::Ok().json(response)
             } else {
                 // Password is incorrect
-                HttpResponse::Ok().json(AuthResult::InvalidCredentials)
+                let response = AuthResponse::invalid_credentials();
+
+                // Return the response
+                HttpResponse::Ok().json(response)
             }
         }
         Ok(None) => {
             // stop timer & print to terminal
-            let duration = time.elapsed();
+            let duration: std::time::Duration = time.elapsed();
             let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
-            let elapsed_seconds = elapsed_ms / 1000.0;
+            let elapsed_seconds: f64 = elapsed_ms / 1000.0;
             println!(
                 "query time: {:?} ({:?} ms) ({:.8} s)",
                 duration, elapsed_ms, elapsed_seconds
             );
-
 
             // User not found, return an empty list and appropriate message.
             HttpResponse::Ok().json(AspNetUsersResponse {
@@ -534,11 +468,7 @@ async fn authenticate_user(
                 message: "No account exists with the given credentials.".to_string(),
             })
         }
-        // Err(err) => {
-        //     // Handle the error, you can return an internal server error or customize it as needed.
-        //     println!("Hey, Caught An Error: {:?}", err);
-        //     HttpResponse::InternalServerError().finish()
-        // }
+
         Err(err) => {
             // Wrap the error and return an error response
             eprintln!("Error fetching ASP.NET user: {:?}", err);
@@ -548,6 +478,31 @@ async fn authenticate_user(
         }
     }
 }
+/*  request input:
+{
+    "username_or_email": "xxxx@example.com",
+    "password": "Abc@123"
+}
+response output:
+Wrong credentials, returned {
+    "success": false,
+    "user": null,
+    "access_token": null,
+    "refresh_token": null
+}
+Valid credentials, it responded: {
+    "success": true,
+    "user": {
+        "Id": "99c0f76b-87de-4819-91ea-631f65741ab2",
+        "UserName": "xxxx@example.com",
+        "Email": "xxxx@example.com",
+        "PasswordHash": "f3egqjaYLSt0t1bKWzu1e7GpaYtHEZGGHLD+6PLJ7xkXKrK4qRWi/aVgPhj4Qibc"
+    },
+    "access_token": "your_generated_access_token",
+    "refresh_token": "your_generated_refresh_token"
+} */
+
+
 
 
 

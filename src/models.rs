@@ -1,10 +1,10 @@
 pub mod models {
-    use serde::{ Serialize, Deserialize };
+    use serde::{Deserialize, Serialize};
 
-    // Define models here (all must be public ! in order for main to access)
+    // Define models here (all must be public to allow main to access)
 
-    #[allow(non_snake_case)]
     #[derive(Debug, Serialize, Deserialize)]
+    #[allow(non_snake_case)]
     pub struct AspNetUser {
         pub Id: String,
         pub UserName: String,
@@ -12,8 +12,6 @@ pub mod models {
         pub PasswordHash: String,
     }
 
-    
-    #[allow(non_snake_case)]
     #[derive(Serialize, Deserialize)]
     pub struct AspNetUsersResponse {
         pub users: Vec<AspNetUser>,
@@ -26,11 +24,32 @@ pub mod models {
         pub username_or_email: String,
         pub password: String,
     }
-    
+
     #[derive(Debug, Serialize, Deserialize)]
-    pub enum AuthResult {
-        Success(AspNetUser), // Authentication succeeded
-        InvalidCredentials, // Invalid username/email or password
-        DatabaseError(String), // Database error
+    pub struct AuthResponse {
+        pub success: bool,
+        pub user: Option<AspNetUser>,
+        pub access_token: Option<String>,
+        pub refresh_token: Option<String>,
+    }
+
+    impl AuthResponse {
+        pub fn success(user: AspNetUser, access_token: String, refresh_token: String) -> Self {
+            AuthResponse {
+                success: true,
+                user: Some(user),
+                access_token: Some(access_token),
+                refresh_token: Some(refresh_token),
+            }
+        }
+
+        pub fn invalid_credentials() -> Self {
+            AuthResponse {
+                success: false,
+                user: None,
+                access_token: None,
+                refresh_token: None,
+            }
+        }
     }
 }
