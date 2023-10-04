@@ -86,6 +86,8 @@ async fn main() -> std::io::Result<()> {
 
     // let _database_url: String = env::var("DATABASE_URL").unwrap();
     const DATABASE_URL: &str = "mysql://user:password@127.0.0.1:3306/consume_actix_api"; // "mysql://user:password@127.0.0.1:3306/actix_sqlx"
+    const MAX_DB_RETRIES: u32 = 5; // Maximum number of connection retries
+    const RETRY_INTERVAL_SECS: u64 = 5; // Interval between retries in seconds
 
     /* Connecting to a database
      * for single connection:
@@ -97,34 +99,86 @@ async fn main() -> std::io::Result<()> {
      * custom pool connection:
      * [MysqlPool|...]Options::new().connect()
      */
-    let pool: MySqlPool = MySqlPoolOptions::new()
-        .max_connections(10)
-        .connect(DATABASE_URL)
-        .await
-        .unwrap();
 
-    let app_state: AppState = AppState { pool };
 
-    HttpServer::new(move || {
-        App::new()
-            // Allow all origins, methods, request headers and exposed headers allowed. Credentials supported. Max age 1 hour. Does not send wildcard.
-            .wrap(Cors::permissive())
+    // Log that the API is starting to establish a database connection
+    println!("⌛️ Starting Server, establishing database connection...");
 
-            .app_data(web::Data::new(app_state.clone()))
-            .route("/", web::get().to(root))
+    let mut retries: u32 = 0;
 
-            // AspNet Identity (other database):
-            .route("/get-aspnet-users", web::get().to(get_aspnet_users))
-            .route("/auth", web::post().to(authenticate_user))
-    })
-    .bind(("127.0.0.1", 4000))?
-    .run()
-    .await
+    while retries < MAX_DB_RETRIES {
+        // create connection pool
+        match MySqlPoolOptions::new()
+            .max_connections(10)
+            .connect(DATABASE_URL)
+            .await
+        {
+            Ok(pool) => {
+                let app_state: AppState = AppState { pool };
+
+                // Start the Actix server with the established database connection
+                println!("✅ Database connection established successful! Starting Server...");
+
+                let server = HttpServer::new(move || {
+                    App::new()
+                        // Allow all origins, methods, request headers and exposed headers allowed. Credentials supported. Max age 1 hour. Does not send wildcard.
+                        .wrap(Cors::permissive())
+
+                        .app_data(web::Data::new(app_state.clone()))
+
+                        .route("/", web::get().to(root))
+
+                        // AspNet Identity (other database):
+                        .route("/get-aspnet-users", web::get().to(get_aspnet_users))
+                        .route("/auth", web::post().to(authenticate_user))
+                })
+                .bind(("127.0.0.1", 4000));
+
+                match server {
+                    Ok(server) => {
+                        // Print the success message after the server starts
+                        println!("✅ Server is up and listening at localhost:4000");
+
+                        // Start the server
+                        if let Err(e) = server.run().await {
+                            println!("❌ Server error: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        println!("❌ Failed to bind server: {}", e);
+                        return Err(e);
+                    }
+                }
+
+                return Ok(());
+                
+            }
+            Err(e) => {
+                // Log the error and wait before retrying
+                eprintln!("❌ Failed to connect to the database: {}", e);
+                retries += 1;
+
+                if retries < MAX_DB_RETRIES {
+                    println!("⌛️ Retrying in {} seconds...", RETRY_INTERVAL_SECS);
+                    std::thread::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECS));
+                } else {
+                    eprintln!("❌ Max connection retries reached. Exiting...");
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "❌ Failed to connect to the database",
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
+
 
 async fn root() -> HttpResponse {
     HttpResponse::Ok().json(ApiResponse {
-        message: "Server is up and running.".to_string(),
+        message: "✅ Server is up and running.".to_string(),
     })
 }
 
@@ -373,8 +427,11 @@ async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
 // success result:
 {"users":[{"Id":"d60449d4-f1c2-43e9-a62f-ae087357fa05","UserName":"nguyentuan8a10ntk@gmail.com","Email":"nguyentuan8a10ntk@gmail.com","PasswordHash":"AQAAAAIAAYagAAAAEKxpBdIrGR6M67pLiiKJA1Jr9LRGHQ8/fln+oHWBvk96wsC4gatTOqyU6zyr76naZw=="}],"message":"Got all ASP.NET users."}
 
-// server error result (wrong table name):
+// err case: database error (wrong table name):
 {"code":"42S02","message":"error returned from database: 1146 (42S02): Table 'consume_actix_api.aspnetuses' doesn't exist"}
+
+// err case: database service terminated at runtime (server still running):
+{"code":null,"message":"pool timed out while waiting for an open connection"}
 */
 
 
@@ -437,16 +494,16 @@ async fn authenticate_user(
                 );
 
                 // Authentication succeeded
-                let access_token = "your_generated_access_token".to_string(); // Replace with your logic
-                let refresh_token = "your_generated_refresh_token".to_string(); // Replace with your logic
+                let access_token: String = "your_generated_access_token".to_string(); // Replace with your logic
+                let refresh_token: String = "your_generated_refresh_token".to_string(); // Replace with your logic
 
-                let response = AuthResponse::success(user, access_token, refresh_token);
+                let response: AuthResponse = AuthResponse::success(user, access_token, refresh_token);
 
                 // Return the response
                 HttpResponse::Ok().json(response)
             } else {
                 // Password is incorrect
-                let response = AuthResponse::invalid_credentials();
+                let response: AuthResponse = AuthResponse::invalid_credentials();
 
                 // Return the response
                 HttpResponse::Ok().json(response)
