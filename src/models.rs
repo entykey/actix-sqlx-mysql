@@ -18,6 +18,22 @@ pub mod models {
         pub message: String,
     }
 
+    #[derive(Debug, Serialize, Deserialize)]
+    #[allow(non_snake_case)]
+    pub struct AspNetUserWithRoles {
+        pub Id: String,
+        pub UserName: String,
+        pub Email: String,
+        pub PasswordHash: String,
+        pub Roles: Vec<Option<String>>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct AspNetUsersWithRolesResponse {
+        pub users: Vec<AspNetUserWithRoles>,
+        pub message: String,
+    }
+
     // Request model to accept user credentials for authentication.
     #[derive(Debug, Serialize, Deserialize)]
     pub struct AuthRequest {

@@ -6,8 +6,10 @@
 // Note: to fix the ERR of mysql: "Column count of mysql.proc is wrong. Expected 20, found 16. The table is probably corrupted"
 // Run: $ sudo /Applications/XAMPP/xamppfiles/bin/mysql_upgrade
 
+use ntex::util::HashMap;
 // use actix_web::{web, App, HttpResponse, HttpServer};
 use ntex::web::{self, App, HttpRequest, HttpResponse};
+use futures::stream::StreamExt; // for using the .next() method
 use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -20,13 +22,15 @@ use rayon::prelude::*; // Import Rayon's prelude
 // define modules & import
 mod models; // Create a new module named "models" by convention
 use models::models::{AspNetUser, AspNetUsersResponse,
-    AuthRequest, AuthResponse}; // Specify the correct module path
+    AuthRequest, AuthResponse, AspNetUserWithRoles}; // Specify the correct module path
 
 mod hasher;
 use hasher::hasher::{verify_password_with_sha256_with_salt};
 
 mod custom_sqlx_error;
 use custom_sqlx_error::custom_sqlx_error::{SqlxErrorResponse, CustomError};
+
+use crate::models::models::AspNetUsersWithRolesResponse;
 
 
 #[derive(Clone)]
@@ -148,14 +152,16 @@ async fn main() -> std::io::Result<()> {
 
                         .state(app_state.clone())
 
-                        // .route("/", web::get().to(root))
-                        .service(web::resource("/").to(root))
+                        .route("/", web::get().to(root))
+                        // .service(web::resource("/").to(root))    // also works
                         // .route("/pool-info", web::get().to(get_pool_info))
                         .service(web::resource("/").to(get_pool_info))
 
                         // AspNet Identity (other database):
                         // .route("/get-aspnet-users", web::get().to(get_aspnet_users))
                         .service(web::resource("/get-aspnet-users").to(get_aspnet_users))
+                        .route("/get-aspnet-users-with-roles", web::get().to(get_aspnet_users_with_roles))
+
                         // .route("/auth", web::post().to(authenticate_user))
                         .service(web::resource("/auth").to(authenticate_user))
                 })
@@ -417,10 +423,13 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
 
 //     Ok(users)
 // }
+
 // Rayon version, reduced 2-4ms
 async fn fetch_aspnet_users(pool: &MySqlPool) -> Result<Vec<AspNetUser>, sqlx::Error> {
     let users: Vec<AspNetUser> =
-        sqlx::query("SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM AspNetUsers u")
+        sqlx::query("SELECT u.Id, u.UserName, u.Email, u.PasswordHash
+                FROM AspNetUsers u"
+        )
             .fetch_all(pool)
             .await?
             .into_par_iter() // Convert to parallel iterator
@@ -496,6 +505,106 @@ async fn get_aspnet_users(
 // err case: database service terminated at runtime (server still running):
 {"code":null,"message":"pool timed out while waiting for an open connection"}
 */
+
+
+async fn fetch_aspnet_users_with_roles(pool: &MySqlPool) -> Result<Vec<AspNetUserWithRoles>, sqlx::Error> {
+    let query =
+        r#"
+            SELECT u.Id, u.UserName, u.Email, u.PasswordHash,
+            r.Name AS RoleName
+            FROM AspNetUsers u
+            LEFT JOIN AspNetUserRoles ur ON u.Id = ur.UserId
+            LEFT JOIN AspNetRoles r ON ur.RoleId = r.Id
+        "#;
+    let mut aspnetusers_with_roles: std::collections::HashMap<String, AspNetUserWithRoles> = std::collections::HashMap::new();
+
+    let mut result = sqlx::query(query)
+        .fetch(pool);
+
+        while let Some(row_result) = result.next().await {  // use futures::stream::StreamExt;  for .next()
+            match row_result {
+                Ok(row) => {
+                    // Your existing code for processing a successful row
+                    let user_id: String = row.get("Id");
+                    let username: String = row.get("UserName");
+                    let email: String = row.get("Email");
+                    let passwordhash: String = row.get("PasswordHash");
+                    let role_name: Option<String> = row.get("RoleName");
+        
+                    let entry: &mut AspNetUserWithRoles = aspnetusers_with_roles
+                        .entry(user_id.clone())
+                        .or_insert(AspNetUserWithRoles {
+                            Id: user_id.clone(),
+                            UserName: username,
+                            Email: email,
+                            PasswordHash: passwordhash,
+                            Roles: vec![],
+                        });
+        
+                    if let Some(role) = role_name {
+                        entry.Roles.push(Some(role));
+                    } else {
+                        entry.Roles.push(None);
+                    }
+                }
+                Err(err) => {
+                    // Handle the error (e.g., print it)
+                    eprintln!("Error fetching row: {:?}", err);
+                }
+            }
+        }
+        
+
+    let aspnetusers_with_roles_list: Vec<AspNetUserWithRoles> = aspnetusers_with_roles
+        .into_values()
+        .collect();
+
+    // for user in &aspnetusers_with_roles_list {
+    //     println!("{:?}", user);
+    // }
+
+    Ok(aspnetusers_with_roles_list)
+}
+
+// HTTP handler for getting al AspNetUser (controller)
+async fn get_aspnet_users_with_roles(
+    // app_state: web::Data<AppState>       // actix_web
+    app_state: web::types::State<AppState>  // ntex
+) -> HttpResponse {
+
+    // timer
+    let time: std::time::Instant = std::time::Instant::now();
+
+    // Fetch ASP.NET users using the private function
+    let users_result: Result<Vec<AspNetUserWithRoles>, sqlx::Error> = fetch_aspnet_users_with_roles(&app_state.pool).await;
+
+    // Handle the result or return an error response
+    match users_result {
+        Ok(users) => {  // : Vec<AspNetUser>
+            // stop timer & print to terminal
+            let duration: std::time::Duration = time.elapsed();
+            let elapsed_ms: f64 = duration.as_secs_f64() * 1000.0;
+            let elapsed_seconds: f64 = elapsed_ms / 1000.0;
+            println!(
+                "query time: {:?} ({:?} ms) ({:.8} s)",
+                duration, elapsed_ms, elapsed_seconds
+            );
+
+            // Response
+            HttpResponse::Ok().json(&AspNetUsersWithRolesResponse {
+                users,
+                message: "Got all ASP.NET Users with joined Roles.".to_string(),
+            })
+        }
+        Err(err) => {
+            // Wrap the error and return an error response
+            eprintln!("Error fetching ASP.NET Users with joined Roles: {:?}", err);
+
+            let custom_err: CustomError = err.into();
+            custom_err.to_http_response()
+        }
+    }
+}
 
 
 
