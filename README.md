@@ -99,3 +99,14 @@ Now user `user` has already been granted the highest permissions, you should be 
 6 rows in set (0.001 sec)
 ```
 Now use the following connection string to connect: `mysql://user:password@127.0.0.1:3306/actix_sqlx`
+
+
+## Example custom error Responses:
+
+1. Pool Timed out (shut down db while API still operating):
+LOG: Error fetching ASP.NET user: PoolTimedOut
+HttpResponse body:
+{
+    "code": null,
+    "message": "pool timed out while waiting for an open connection"
+}

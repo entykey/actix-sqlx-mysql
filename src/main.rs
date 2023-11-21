@@ -1,4 +1,4 @@
-// total rust project size: 1.37GB on Windows 10;  1.36GB MacOS Monterey    |
+// total rust project size: 1.37GB on Windows 10;  1.36GB on MacOS Monterey    |
 // Intel(R) Core(TM) i5-4460  CPU @ 3.20GHz   3.20 GHz |
 // Mem: 4.00 GB (3.88 GB usable)    |
 // C: 99,6GB free of 165 GB    |   D: 299 GB (empty)
@@ -6,7 +6,8 @@
 // Note: to fix the ERR of mysql: "Column count of mysql.proc is wrong. Expected 20, found 16. The table is probably corrupted"
 // Run: $ sudo /Applications/XAMPP/xamppfiles/bin/mysql_upgrade
 
-use actix_web::{web, App, HttpResponse, HttpServer};
+// use actix_web::{web, App, HttpResponse, HttpServer};
+use ntex::web::{self, App, HttpRequest, HttpResponse};
 use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -14,6 +15,7 @@ use sqlx::mysql::{MySqlConnection, MySqlPool,
     MySqlPoolOptions, MySqlDatabaseError, MySqlQueryResult, MySqlRow};
 use sqlx::Row;
 use uuid::Uuid;
+use rayon::prelude::*; // Import Rayon's prelude
 
 // define modules & import
 mod models; // Create a new module named "models" by convention
@@ -23,8 +25,8 @@ use models::models::{AspNetUser, AspNetUsersResponse,
 mod hasher;
 use hasher::hasher::{verify_password_with_sha256_with_salt};
 
-mod custom_error;
-use custom_error::custom_error::{SqlxErrorResponse, CustomError};
+mod custom_sqlx_error;
+use custom_sqlx_error::custom_sqlx_error::{SqlxErrorResponse, CustomError};
 
 
 #[derive(Clone)]
@@ -81,7 +83,8 @@ struct UsersResponse<'a> {
     message: &'static str,
 }
 
-#[actix_web::main]
+// #[actix_web::main]
+#[ntex::main]
 async fn main() -> std::io::Result<()> {
 
     // let _database_url: String = env::var("DATABASE_URL").unwrap();
@@ -119,25 +122,49 @@ async fn main() -> std::io::Result<()> {
                 // Start the Actix server with the established database connection
                 println!("✅ Database connection established successful! Starting Server...");
 
-                let server = HttpServer::new(move || {
+                // actix_web server
+                // let server = HttpServer::new(move || {
+                //     App::new()
+                //         // Allow all origins, methods, request headers and exposed headers allowed. Credentials supported. Max age 1 hour. Does not send wildcard.
+                //         .wrap(Cors::permissive())
+
+                //         .app_data(web::Data::new(app_state.clone()))
+
+                //         .route("/", web::get().to(root))
+                //         .route("/pool-info", web::get().to(get_pool_info))
+
+                //         // AspNet Identity (other database):
+                //         .route("/get-aspnet-users", web::get().to(get_aspnet_users))
+                //         .route("/auth", web::post().to(authenticate_user))
+                // })
+                // .bind(("127.0.0.1", 4000));
+                
+                // ntex tokio server
+                let server = web::server(move || {
                     App::new()
                         // Allow all origins, methods, request headers and exposed headers allowed. Credentials supported. Max age 1 hour. Does not send wildcard.
-                        .wrap(Cors::permissive())
+                        // NO cors yet (ntex)
+                        // .wrap(Cors::permissive())
 
-                        .app_data(web::Data::new(app_state.clone()))
+                        .state(app_state.clone())
 
-                        .route("/", web::get().to(root))
+                        // .route("/", web::get().to(root))
+                        .service(web::resource("/").to(root))
+                        // .route("/pool-info", web::get().to(get_pool_info))
+                        .service(web::resource("/").to(get_pool_info))
 
                         // AspNet Identity (other database):
-                        .route("/get-aspnet-users", web::get().to(get_aspnet_users))
-                        .route("/auth", web::post().to(authenticate_user))
+                        // .route("/get-aspnet-users", web::get().to(get_aspnet_users))
+                        .service(web::resource("/get-aspnet-users").to(get_aspnet_users))
+                        // .route("/auth", web::post().to(authenticate_user))
+                        .service(web::resource("/auth").to(authenticate_user))
                 })
                 .bind(("127.0.0.1", 4000));
 
                 match server {
                     Ok(server) => {
                         // Print the success message after the server starts
-                        println!("✅ Server is up and listening at localhost:4000");
+                        println!("🚀 Server is up and listening at localhost:4000");
 
                         // Start the server
                         if let Err(e) = server.run().await {
@@ -177,9 +204,22 @@ async fn main() -> std::io::Result<()> {
 
 
 async fn root() -> HttpResponse {
-    HttpResponse::Ok().json(ApiResponse {
+    HttpResponse::Ok().json(&ApiResponse {
         message: "✅ Server is up and running.".to_string(),
     })
+}
+
+// async fn get_pool_info(app_context: web::Data<AppState>, req: actix_web::HttpRequest) -> HttpResponse {
+async fn get_pool_info(app_context: web::types::State<AppState>, req: HttpRequest) -> HttpResponse {
+    let app_context_address : String = format!("{:p}", app_context.get_ref());
+    let pool_address: String = format!("{:p}", &app_context.pool);
+    let request_address: String = format!("{:p}", &req);
+
+    HttpResponse::Ok().json(&json!({
+        "app_context_address": app_context_address,
+        "pool_address": pool_address,
+        "request_address": request_address,
+    }))
 }
 
 
@@ -361,25 +401,48 @@ async fn get_user(path: web::Path<i32>, app_state: web::Data<AppState>) -> HttpR
 
 
 // Define the private function to fetch ASP.NET users (Repository)
+// async fn fetch_aspnet_users(pool: &MySqlPool) -> Result<Vec<AspNetUser>, sqlx::Error> {
+//     let users: Vec<AspNetUser> =
+//         sqlx::query("SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM AspNetUsers u")
+//             .map(|user: sqlx::mysql::MySqlRow| {
+//                 AspNetUser {
+//                     Id: user.get(0), // must add 'use sqlx::Row' !!
+//                     UserName: user.get(1),
+//                     Email: user.get(2),
+//                     PasswordHash: user.get(3),
+//                 }
+//             })
+//             .fetch_all(pool)
+//             .await?;
+
+//     Ok(users)
+// }
+// Rayon version, reduced 2-4ms
 async fn fetch_aspnet_users(pool: &MySqlPool) -> Result<Vec<AspNetUser>, sqlx::Error> {
     let users: Vec<AspNetUser> =
         sqlx::query("SELECT u.Id, u.UserName, u.Email, u.PasswordHash FROM AspNetUsers u")
+            .fetch_all(pool)
+            .await?
+            .into_par_iter() // Convert to parallel iterator
             .map(|user: sqlx::mysql::MySqlRow| {
                 AspNetUser {
-                    Id: user.get(0), // must add 'use sqlx::Row' !!
+                    Id: user.get(0),
                     UserName: user.get(1),
                     Email: user.get(2),
                     PasswordHash: user.get(3),
                 }
             })
-            .fetch_all(pool)
-            .await?;
+            .collect(); // Collect results back into a Vec
 
     Ok(users)
 }
 
 // HTTP handler for getting al AspNetUser (controller)
-async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
+async fn get_aspnet_users(
+    // app_state: web::Data<AppState>       // actix_web
+    app_state: web::types::State<AppState>  // ntex
+) -> HttpResponse {
+
     // timer
     let time: std::time::Instant = std::time::Instant::now();
 
@@ -399,7 +462,7 @@ async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
             );
 
             // Response
-            HttpResponse::Ok().json(AspNetUsersResponse {
+            HttpResponse::Ok().json(&AspNetUsersResponse {
                 users,
                 message: "Got all ASP.NET users.".to_string(),
             })
@@ -440,7 +503,8 @@ async fn get_aspnet_users(app_state: web::Data<AppState>) -> HttpResponse {
 
 // Define a function to fetch one user by username or email.
 async fn fetch_one_aspnet_user(
-    app_state: web::Data<AppState>,
+    // app_state: web::Data<AppState>           // actix_web
+    app_state: web::types::State<AppState>,     // ntex
     username_or_email: &str,
 ) -> Result<Option<AspNetUser>, sqlx::Error> {
     let user: Result<Option<AspNetUser>, sqlx::Error> = match sqlx::query(
@@ -471,9 +535,12 @@ async fn fetch_one_aspnet_user(
 
 // Handler for user authentication.
 async fn authenticate_user(
-    app_state: web::Data<AppState>,
-    auth_request: web::Json<AuthRequest>, // Use the request model.
+    // app_state: web::Data<AppState>           // actix_web
+    app_state: web::types::State<AppState>,     // ntex
+    // auth_request: web::Json<AuthRequest>,    // actix_web
+    auth_request: ntex::web::types::Json<AuthRequest>   // ntex
 ) -> HttpResponse {
+    
     // timer
     let time: std::time::Instant = std::time::Instant::now();
 
@@ -500,13 +567,13 @@ async fn authenticate_user(
                 let response: AuthResponse = AuthResponse::success(user, access_token, refresh_token);
 
                 // Return the response
-                HttpResponse::Ok().json(response)
+                HttpResponse::Ok().json(&response)
             } else {
                 // Password is incorrect
                 let response: AuthResponse = AuthResponse::invalid_credentials();
 
                 // Return the response
-                HttpResponse::Ok().json(response)
+                HttpResponse::Ok().json(&response)
             }
         }
         Ok(None) => {
@@ -520,7 +587,7 @@ async fn authenticate_user(
             );
 
             // User not found, return an empty list and appropriate message.
-            HttpResponse::Ok().json(AspNetUsersResponse {
+            HttpResponse::Ok().json(&AspNetUsersResponse {
                 users: vec![],
                 message: "No account exists with the given credentials.".to_string(),
             })
@@ -528,7 +595,7 @@ async fn authenticate_user(
 
         Err(err) => {
             // Wrap the error and return an error response
-            eprintln!("Error fetching ASP.NET user: {:?}", err);
+            eprintln!("[Task: authenticate_user()]: Error fetching ASP.NET user: {:?}", err);
 
             let custom_err: CustomError = err.into();
             custom_err.to_http_response()
