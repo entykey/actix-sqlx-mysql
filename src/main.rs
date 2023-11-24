@@ -6,6 +6,8 @@
 // Note: to fix the ERR of mysql: "Column count of mysql.proc is wrong. Expected 20, found 16. The table is probably corrupted"
 // Run: $ sudo /Applications/XAMPP/xamppfiles/bin/mysql_upgrade
 
+use std::env;
+
 use ntex::util::HashMap;
 // use actix_web::{web, App, HttpResponse, HttpServer};
 use ntex::web::{self, App, HttpRequest, HttpResponse};
@@ -16,13 +18,16 @@ use serde_json::json;
 use sqlx::mysql::{MySqlConnection, MySqlPool, 
     MySqlPoolOptions, MySqlDatabaseError, MySqlQueryResult, MySqlRow};
 use sqlx::Row;
-use uuid::Uuid;
+// use uuid::Uuid;
 use rayon::prelude::*; // Import Rayon's prelude
 
 // define modules & import
 mod models; // Create a new module named "models" by convention
 use models::models::{AspNetUser, AspNetUsersResponse,
-    AuthRequest, AuthResponse, AspNetUserWithRoles}; // Specify the correct module path
+    AuthRequest, AuthResponse, AspNetUserWithRoles
+}; // Specify the correct module path
+
+mod role_handler;
 
 mod hasher;
 use hasher::hasher::{verify_password_with_sha256_with_salt};
@@ -93,6 +98,11 @@ async fn main() -> std::io::Result<()> {
 
     // let _database_url: String = env::var("DATABASE_URL").unwrap();
     const DATABASE_URL: &str = "mysql://user:password@127.0.0.1:3306/consume_actix_api"; // "mysql://user:password@127.0.0.1:3306/actix_sqlx"
+    
+    // (FAILED) Attempt to read the DATABASE_URL environment variable
+    #[allow(non_snake_case)]
+    // let DATABASE_URL = std::env::var("DATABASE_URL").expect("DATABASE_URL is not set in the .env file");
+
     const MAX_DB_RETRIES: u32 = 5; // Maximum number of connection retries
     const RETRY_INTERVAL_SECS: u64 = 5; // Interval between retries in seconds
 
@@ -117,7 +127,7 @@ async fn main() -> std::io::Result<()> {
         // create connection pool
         match MySqlPoolOptions::new()
             .max_connections(10)
-            .connect(DATABASE_URL)
+            .connect(&DATABASE_URL)
             .await
         {
             Ok(pool) => {
@@ -161,6 +171,8 @@ async fn main() -> std::io::Result<()> {
                         // .route("/get-aspnet-users", web::get().to(get_aspnet_users))
                         .service(web::resource("/get-aspnet-users").to(get_aspnet_users))
                         .route("/get-aspnet-users-with-roles", web::get().to(get_aspnet_users_with_roles))
+
+                        .service(web::scope("/api").configure(role_handler::configure))
 
                         // .route("/auth", web::post().to(authenticate_user))
                         .service(web::resource("/auth").to(authenticate_user))

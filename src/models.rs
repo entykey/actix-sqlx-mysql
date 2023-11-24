@@ -3,6 +3,20 @@ pub mod models {
 
     // Define models here (all must be public to allow main to access)
 
+    #[derive(Debug, sqlx::FromRow, Serialize, Deserialize)]
+    #[allow(non_snake_case)]
+    pub struct AspNetRole {
+        pub Id: String,
+        pub Name: String,
+        pub NormalizedName: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[allow(non_snake_case)]
+    pub struct NewAspNetRole {
+        pub name: String,
+    }
+
     #[derive(Debug, Serialize, Deserialize)]
     #[allow(non_snake_case)]
     pub struct AspNetUser {
