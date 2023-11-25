@@ -17,6 +17,14 @@ pub mod models {
         pub name: String,
     }
 
+    #[derive(sqlx::FromRow, Debug, Serialize, Deserialize)]
+    #[allow(non_snake_case)]
+    pub struct UserInRoleInfo {
+        pub RoleId: String,
+        pub RoleName: String,
+        pub IsInRole: bool,
+    }
+
     #[derive(Debug, Serialize, Deserialize)]
     #[allow(non_snake_case)]
     pub struct AspNetUser {

@@ -1,13 +1,13 @@
 use ntex::web::{self, HttpResponse};
 use serde::{Deserialize, Serialize};
-use sqlx::MySqlPool;
 
-use crate::{models::models::{AspNetRole, NewAspNetRole}, AppState};
+use crate::{models::models::{AspNetRole, NewAspNetRole, UserInRoleInfo}, AppState};
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/roles")
             .route("", web::get().to(load_roles))
+            .route("/{username}", web::get().to(load_roles_by_username))
             .route("", web::post().to(add_role))
             .route("/{id}", web::put().to(update_role))
             .route("/{id}", web::delete().to(delete_role)),
@@ -61,6 +61,41 @@ async fn load_roles(
     }
 }
 
+async fn load_roles_by_username(
+    app_state: web::types::State<AppState>, // ntex
+    path: web::types::Path<String>,
+) -> HttpResponse {
+
+    let username: &String = &*path;
+    let result: Result<Vec<UserInRoleInfo>, sqlx::Error> = sqlx::query_as::<_, UserInRoleInfo>(
+        r#"
+        SELECT
+            r.Id as RoleId,
+            r.Name as RoleName,
+            COALESCE(ur.UserId, 0) as IsInRole
+        FROM AspNetRoles r
+        LEFT JOIN (
+            SELECT RoleId, 1 as UserId
+            FROM AspNetUserRoles
+            WHERE UserId = (SELECT Id FROM AspNetUsers WHERE UserName = ?)
+        ) ur ON r.Id = ur.RoleId
+        "#,
+    )
+    .bind(username)
+    .fetch_all(&app_state.pool)
+    .await;
+
+    match result {
+        Ok(user_roles) => HttpResponse::Ok().json(&user_roles),
+        // Err(_) => web::HttpResponse::InternalServerError().finish()
+
+        // Catching other errors
+        Err(e) => {
+            eprintln!("Error fetching roles of designated user: {:?}", e);
+            HttpResponse::InternalServerError().body("Internal Server Error")
+        }
+    }
+}
 
 async fn add_role(
     app_state: web::types::State<AppState>,
@@ -96,8 +131,8 @@ async fn update_role(
     path: web::types::Path<String>,
     new_role: web::types::Json<NewAspNetRole>,
 ) -> HttpResponse {
-    let role_id = &*path;
-    let name = &new_role.name;
+    let role_id: &String = &*path;
+    let name: &String = &new_role.name;
 
     let update_result = sqlx::query!(
         "UPDATE AspNetRoles SET Name = ?, NormalizedName = ? WHERE Id = ?",
